@@ -1,2 +1,7 @@
 library(flexdashboard)
+library(shiny)
+library(shinydashboard)
+library(quantmod)
+library(dygraphs)
+library(DT)
 rmarkdown::run("Finance_Dashboard.Rmd")
