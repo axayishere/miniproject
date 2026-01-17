@@ -19,14 +19,15 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 
 
 install.packages("pdfetch")
-install.packages(c("shiny,flexdashboard", "tidyquant", "tidyverse", "plotly", "scales", "DT"))
+install.packages(c("shiny", "flexdashboard", "tidyquant", "tidyverse", "plotly", "scales", "DT", "quantmod", "zoo"))
 # Load required libraries
 library(flexdashboard)
 library(tidyverse)
 library(tidyquant)
 library(plotly)
 library(scales)
-library(DT)
+library(DT) 
+library(rsconnect)
 library(shiny)
 
 
@@ -484,4 +485,5 @@ p7 <- ggplot(summary_stats,
 ggplotly(p7)
 
 ```
+
 
