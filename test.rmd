@@ -9,11 +9,5 @@ output: html_document
 # 1. Environment Setup
 knitr::opts_chunk$set(echo = FALSE)
 
-library(flexdashboard)
 library(tidyverse)
-library(tidyquant)
-library(scales)
-library(shiny)
-library(quantmod)
-library(zoo)
 ```
