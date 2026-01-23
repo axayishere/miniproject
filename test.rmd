@@ -17,3 +17,456 @@ library(here)
 library(maps)
 library(sf)
 ```
+
+```{r data-collection}
+# Define the 4 companies to analyze
+# Choose 4 different companies - examples here are Tesla, Amazon, Netflix, Google
+tickers <- c("HPQ", "IBM", "MSFT", "ORCL")
+
+
+# Set date range for analysis (last 6 months for short-term analysis)
+start_date <- Sys.Date() - 180  # 6 months ago
+end_date <- Sys.Date()
+
+# Download stock data with better error handling
+stock_data_list <- list()
+
+cat("Downloading stock data...\n")
+
+for (ticker in tickers) {
+  cat(paste("Fetching", ticker, "...\n"))
+  
+  tryCatch({
+    # Download the data
+    stock_data <- getSymbols(ticker, 
+                            src = "yahoo", 
+                            from = start_date, 
+                            to = end_date, 
+                            auto.assign = FALSE)
+    
+    # Convert to dataframe with proper column names
+    df <- data.frame(
+      Date = index(stock_data),
+      Open = as.numeric(Op(stock_data)),
+      High = as.numeric(Hi(stock_data)),
+      Low = as.numeric(Lo(stock_data)),
+      Close = as.numeric(Cl(stock_data)),
+      Volume = as.numeric(Vo(stock_data)),
+      Adjusted = as.numeric(Ad(stock_data)),
+      Ticker = ticker
+    )
+    
+    stock_data_list[[ticker]] <- df
+    cat(paste("✓", ticker, "downloaded successfully\n"))
+    
+  }, error = function(e) {
+    cat(paste("✗ Error downloading", ticker, ":", e$message, "\n"))
+  })
+}
+
+# Check if we got any data
+if (length(stock_data_list) == 0) {
+  stop("ERROR: No stock data was downloaded. Please check your internet connection and ticker symbols.")
+}
+
+cat(paste("\nSuccessfully downloaded", length(stock_data_list), "out of", length(tickers), "stocks\n"))
+
+# Combine all data
+all_stocks <- bind_rows(stock_data_list)
+
+# Verify we have data
+if (nrow(all_stocks) == 0) {
+  stop("ERROR: No data available after combining. Check ticker symbols and date range.")
+}
+
+cat(paste("Total rows of data:", nrow(all_stocks), "\n"))
+
+# Calculate additional metrics
+all_stocks <- all_stocks %>%
+  group_by(Ticker) %>%
+  arrange(Date) %>%
+  mutate(
+    Daily_Return = (Close - lag(Close)) / lag(Close) * 100,
+    MA_7 = zoo::rollmean(Close, k = 7, fill = NA, align = "right"),
+    MA_30 = zoo::rollmean(Close, k = 30, fill = NA, align = "right"),
+    Volatility = zoo::rollapply(Daily_Return, width = 20, FUN = sd, fill = NA, align = "right"),
+    Price_Change = (Close - first(Close)) / first(Close) * 100
+  ) %>%
+  ungroup()
+
+# Calculate summary statistics
+summary_stats <- all_stocks %>%
+  group_by(Ticker) %>%
+  summarise(
+    Current_Price = last(Close),
+    Starting_Price = first(Close),
+    Total_Return = ((last(Close) - first(Close)) / first(Close)) * 100,
+    Avg_Daily_Return = mean(Daily_Return, na.rm = TRUE),
+    Volatility = sd(Daily_Return, na.rm = TRUE),
+    Max_Price = max(High, na.rm = TRUE),
+    Min_Price = min(Low, na.rm = TRUE),
+    Avg_Volume = mean(Volume, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(Total_Return))
+
+cat("Data processing complete!\n")
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Summary Statistics
+
+```{r summary-table}
+colnames(summary_stats)
+
+# Create formatted summary table
+summary_table <- summary_stats %>%
+  mutate(
+    Current_Price    = paste0("$", round(Current_Price, 2)),
+    Total_Return     = paste0(round(Total_Return, 2), "%"),
+    Avg_Daily_Return = paste0(round(Avg_Daily_Return, 3), "%"),
+    Volatility       = paste0(round(Volatility, 2), "%"),
+    Avg_Volume       = scales::comma(round(Avg_Volume, 0))
+  ) %>%
+  select(
+    Current_Price,
+    Total_Return,
+    Avg_Daily_Return,
+    Volatility,
+    Avg_Volume
+  )
+
+datatable(summary_table, 
+          options = list(dom = 't', pageLength = 4),
+          rownames = FALSE,
+          colnames = c("symbol", "Current Price", "Total Return", "Avg Daily Return", "Volatility", "Avg Volume"))
+```
+
+### Key Performance Indicators
+
+```{r kpis}
+# Choose the best stock (highest Total_Return)
+best_stock <- summary_stats %>%
+  arrange(desc(Total_Return)) %>%
+  slice(1)
+
+# Create a label to show
+best_label <- paste0(
+  "Best Performer: ",
+  rownames(best_stock), " (",
+  round(best_stock$Total_Return, 2), "% total return)"
+)
+
+best_label
+
+
+```
+
+```{r kpi-return}
+
+# Get best stock
+best_stock <- summary_stats %>%
+  arrange(desc(Total_Return)) %>%
+  slice(1)
+
+# Show result
+cat("**", rownames(best_stock), "**\n")
+cat("Total Return: ", round(best_stock$Total_Return, 2), "%")
+
+```
+
+```{r kpi-volatility}
+valueBox(paste0(round(best_stock$Volatility, 2), "%"), 
+         caption = "Volatility (Std Dev)", 
+         icon = "fa-signal",
+         color = "warning")
+```
+
+### Investment Recommendation
+
+Based on the analysis of the four securities over the past 6 months:
+
+**Recommended Investment:** `r best_stock$Ticker`
+
+**Rationale:**
+
+- **Highest Total Return:** `r round(best_stock$Total_Return, 2)`% gain over 6 months
+- **Risk Profile:** Volatility of `r round(best_stock$Volatility, 2)`%
+- **Trend Analysis:** Shows consistent upward momentum based on moving averages
+- **Volume:** Strong average trading volume of `r scales::comma(round(best_stock$Avg_Volume, 0))` shares
+
+**Risk Considerations:**
+
+While `r best_stock$Ticker` shows the strongest performance, investors should consider:
+
+1. Higher volatility may indicate increased risk
+2. Past performance does not guarantee future results
+3. Diversification across multiple securities may reduce portfolio risk
+4. Market conditions can change rapidly
+
+**Decision:** For short-term gains, `r best_stock$Ticker` presents the most attractive opportunity among the four options analyzed.
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Price Comparison Over Time
+
+```{r price-comparison}
+# Create line chart comparing all 4 stocks (normalized to 100 at start)
+normalized_data <- all_stocks %>%
+  group_by(Ticker) %>%
+  mutate(Normalized_Price = (Close / first(Close)) * 100) %>%
+  ungroup()
+
+p1 <- ggplot(normalized_data, aes(x = Date, y = Normalized_Price, color = Ticker)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Normalized Price Performance (Base 100)",
+    subtitle = "Comparison of 4 Securities Over 6 Months",
+    x = "Date",
+    y = "Normalized Price",
+    color = "Ticker"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "top"
+  ) +
+  scale_y_continuous(labels = scales::comma) +
+  geom_hline(yintercept = 100, linetype = "dashed", alpha = 0.5)
+
+ggplotly(p1) %>%
+  layout(hovermode = "x unified")
+```
+
+### Daily Returns Distribution
+
+```{r returns-distribution}
+# Box plot of daily returns
+p2 <- ggplot(all_stocks %>% filter(!is.na(Daily_Return)), 
+             aes(x = Ticker, y = Daily_Return, fill = Ticker)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Daily Returns Distribution by Ticker",
+    subtitle = "Box plot showing median, quartiles, and outliers",
+    x = "Ticker",
+    y = "Daily Return (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "none"
+  )
+
+ggplotly(p2)
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Price Action with Moving Averages
+
+```{r price-action}
+# Create faceted chart with moving averages for each stock
+p3 <- ggplot(all_stocks, aes(x = Date)) +
+  geom_line(aes(y = Close, color = "Close Price"), size = 0.8) +
+  geom_line(aes(y = MA_7, color = "7-Day MA"), size = 0.6, linetype = "dashed") +
+  geom_line(aes(y = MA_30, color = "30-Day MA"), size = 0.6, linetype = "dotted") +
+  facet_wrap(~ Ticker, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Price Action with Moving Averages",
+    subtitle = "Individual stock charts with 7-day and 30-day moving averages",
+    x = "Date",
+    y = "Price ($)",
+    color = "Indicator"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "top",
+    strip.text = element_text(face = "bold")
+  ) +
+  scale_color_manual(values = c("Close Price" = "#2C3E50", 
+                                  "7-Day MA" = "#E74C3C", 
+                                  "30-Day MA" = "#3498DB"))
+
+ggplotly(p3)
+```
+
+### Volatility Comparison
+
+```{r volatility-chart}
+# Create volatility over time chart
+volatility_data <- all_stocks %>%
+  filter(!is.na(Volatility))
+
+p4 <- ggplot(volatility_data, aes(x = Date, y = Volatility, color = Ticker)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Rolling 20-Day Volatility",
+    subtitle = "Standard deviation of daily returns (20-day window)",
+    x = "Date",
+    y = "Volatility (%)",
+    color = "Ticker"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "top"
+  )
+
+ggplotly(p4) %>%
+  layout(hovermode = "x unified")
+```
+
+### Trading Volume Analysis
+
+```{r volume-analysis}
+# Volume comparison
+p5 <- ggplot(all_stocks, aes(x = Date, y = Volume, fill = Ticker)) +
+  geom_col(alpha = 0.7) +
+  facet_wrap(~ Ticker, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Daily Trading Volume",
+    subtitle = "Volume trends for each security",
+    x = "Date",
+    y = "Volume (shares)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "none",
+    strip.text = element_text(face = "bold")
+  ) +
+  scale_y_continuous(labels = scales::comma)
+
+ggplotly(p5)
+```
+
+Analysis {data-orientation=rows}
+=======================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Methodology
+
+**Data Collection:**
+
+- Selected 4 securities: `r paste(tickers, collapse = ", ")`
+- Time period: 6 months (180 days) ending `r format(Sys.Date(), "%B %d, %Y")`
+- Data source: Yahoo Finance via `quantmod` package
+- Metrics calculated: daily returns, moving averages, volatility, total returns
+
+**Analysis Approach:**
+
+1. **Price Performance:** Normalized prices to base 100 for direct comparison
+2. **Returns Analysis:** Calculated daily percentage returns and total period returns
+3. **Volatility Assessment:** Used 20-day rolling standard deviation of returns
+4. **Trend Identification:** Applied 7-day and 30-day moving averages
+5. **Volume Analysis:** Examined trading volume patterns
+
+**Key Metrics:**
+
+- **Total Return:** Overall percentage gain/loss over the period
+- **Average Daily Return:** Mean daily percentage change
+- **Volatility:** Standard deviation of daily returns (risk measure)
+- **Moving Averages:** Trend indicators (7-day and 30-day)
+
+### Technical Notes
+
+**Visualization Design Principles:**
+
+All visualizations were custom-built using `ggplot2` without pre-made financial charting functions, following these principles:
+
+- **Clarity:** Clear labels, titles, and legends
+- **Consistency:** Uniform color scheme across all charts
+- **Interactivity:** All charts are interactive using `plotly`
+- **Context:** Comparison metrics and benchmarks included
+- **Completeness:** Multiple perspectives (price, returns, volatility, volume)
+
+**Dashboard Layout:**
+
+Following dashboard best practices:
+
+- Summary statistics prominently displayed (top-left)
+- KPIs in value boxes for quick insights
+- Primary comparison chart in largest space
+- Supporting analyses in organized grid
+- Written recommendation for decision support
+
+Row
+-----------------------------------------------------------------------
+
+### Performance Summary
+
+```{r performance-summary}
+# Create a comprehensive performance comparison chart
+# 1) Start from summary_stats and keep only the three metrics
+performance_summary <- summary_stats %>%
+  dplyr::select(
+    Total_Return,
+    Avg_Daily_Return,
+    Volatility
+  ) %>%
+  # 2) Turn wide data into long format with Metric and Value columns
+  tidyr::pivot_longer(
+    cols      = everything(),
+    names_to  = "Metric",
+    values_to = "Value"
+  )
+
+# 3) Plot: use Metric on x, not Ticker, because there is no Ticker column here
+p6 <- ggplot(performance_summary,
+             aes(x = Metric, y = Value, fill = Metric)) +
+  geom_col(alpha = 0.8) +
+  facet_wrap(~ Metric, scales = "free_y", ncol = 3) +
+  labs(
+    title = "Performance Metrics Comparison",
+    subtitle = "Side-by-side comparison of key metrics",
+    x = "Metric",
+    y = "Value"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title    = element_text(face = "bold", size = 14),
+    legend.position = "none",
+    strip.text    = element_text(face = "bold")
+  ) +
+  geom_text(aes(label = round(Value, 2)), vjust = -0.5, size = 3)
+
+ggplotly(p6)
+
+```
+
+### Risk-Return Profile
+
+```{r risk-return}
+# Create risk-return scatter plot
+p7 <- ggplot(summary_stats,
+             aes(x = Volatility,
+                 y = Total_Return,
+                 size = Avg_Volume)) +
+  geom_point(alpha = 0.7, color = "steelblue") +
+  labs(
+    title = "Risk-Return Profile",
+    subtitle = "Higher return vs. volatility trade-off (bubble size = avg volume)",
+    x = "Volatility (Risk) - Standard Deviation of Daily Returns (%)",
+    y = "Total Return (%)",
+    size = "Avg Volume"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "right"
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  geom_vline(xintercept = mean(summary_stats$Volatility),
+             linetype = "dashed", alpha = 0.5)
+
+ggplotly(p7)
+
+```
