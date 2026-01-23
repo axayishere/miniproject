@@ -7,7 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 # 1. Environment Setup
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = FALSE)
 
 library(flexdashboard)
 library(tidyverse)
@@ -18,49 +18,4 @@ library(DT)
 library(shiny)
 library(quantmod)
 library(zoo)
-
-# 2. Data Collection & Processing
-tickers <- c("HPQ", "IBM", "MSFT", "ORCL")
-start_date <- Sys.Date() - 180 
-end_date <- Sys.Date()
-
-stock_data_list <- list()
-
-for (ticker in tickers) {
-  tryCatch({
-    stock_data <- getSymbols(ticker, src = "yahoo", from = start_date, to = end_date, auto.assign = FALSE)
-    df <- data.frame(
-      Date = index(stock_data),
-      Close = as.numeric(Cl(stock_data)),
-      Volume = as.numeric(Vo(stock_data)),
-      Ticker = ticker
-    )
-    stock_data_list[[ticker]] <- df
-  }, error = function(e) { message(paste("Error:", ticker)) })
-}
-
-all_stocks <- bind_rows(stock_data_list)
-
-# Calculations
-all_stocks <- all_stocks %>%
-  group_by(Ticker) %>%
-  arrange(Date) %>%
-  mutate(
-    Daily_Return = (Close - lag(Close)) / lag(Close) * 100,
-    Normalized = (Close / first(Close)) * 100,
-    Volatility = rollapply(Daily_Return, width = 20, FUN = sd, fill = NA, align = "right")
-  ) %>%
-  ungroup()
-
-summary_stats <- all_stocks %>%
-  group_by(Ticker) %>%
-  summarise(
-    Current_Price = last(Close),
-    Total_Return = ((last(Close) - first(Close)) / first(Close)) * 100,
-    Avg_Volat = sd(Daily_Return, na.rm = TRUE),
-    Avg_Volume = mean(Volume, na.rm = TRUE),
-    .groups = 'drop'
-  ) %>%
-  arrange(desc(Total_Return))
-
-best_stock <- summary_stats[1,]
+```
