@@ -4,85 +4,72 @@ author: "Connect Cloud"
 date: "`r Sys.Date()`"
 output: html_document
 ---
+```{r setup, include=FALSE}
 
+# Set optionsrm
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
 
-```{r setup, include = FALSE}
-# Set global knit options (optional)
-knitr::opts_chunk$set(echo = FALSE)
-
-# load packages
+install.packages("pdfetch")
+install.packages(c("shiny", "flexdashboard", "tidyquant", "tidyverse", "plotly", "scales", "DT", "quantmod", "zoo", "rsconnect"))
+# Load required libraries
+library(flexdashboard)
 library(tidyverse)
-library(viridis)
-library(here)
-library(maps)
-library(sf)
+library(tidyquant)
+library(plotly)
+library(scales)
+library(DT) 
+library(rsconnect)
+library(shiny)
+
+
 ```
 
 ```{r data-collection}
-# 3. Data Collection Logic (Offline-First)
+# Define the 4 companies to analyze
+# Choose 4 different companies - examples here are Tesla, Amazon, Netflix, Google
 tickers <- c("HPQ", "IBM", "MSFT", "ORCL")
-data_dir <- "data"
 
-# Create folder if it doesn't exist
-if (!dir.exists(data_dir)) {
-  dir.create(data_dir)
-}
 
+# Set date range for analysis (last 6 months for short-term analysis)
+start_date <- Sys.Date() - 180  # 6 months ago
+end_date <- Sys.Date()
+
+# Download stock data with better error handling
 stock_data_list <- list()
 
+cat("Downloading stock data...\n")
+
 for (ticker in tickers) {
-  file_path <- file.path(data_dir, paste0(ticker, ".csv"))
+  cat(paste("Fetching", ticker, "...\n"))
   
-  if (file.exists(file_path)) {
-    # LOAD FROM LOCAL CSV
-    df <- read_csv(file_path, show_col_types = FALSE)
-    # Standardize column names to Title Case
-    df <- df %>% rename_with(str_to_title) %>% mutate(Ticker = ticker)
+  tryCatch({
+    # Download the data
+    stock_data <- getSymbols(ticker, 
+                            src = "yahoo", 
+                            from = start_date, 
+                            to = end_date, 
+                            auto.assign = FALSE)
+    
+    # Convert to dataframe with proper column names
+    df <- data.frame(
+      Date = index(stock_data),
+      Open = as.numeric(Op(stock_data)),
+      High = as.numeric(Hi(stock_data)),
+      Low = as.numeric(Lo(stock_data)),
+      Close = as.numeric(Cl(stock_data)),
+      Volume = as.numeric(Vo(stock_data)),
+      Adjusted = as.numeric(Ad(stock_data)),
+      Ticker = ticker
+    )
+    
     stock_data_list[[ticker]] <- df
-  } else {
-    # DOWNLOAD IF MISSING
-    tryCatch({
-      df_raw <- tq_get(ticker, from = Sys.Date() - 180, to = Sys.Date())
-      if (nrow(df_raw) > 0) {
-        write_csv(df_raw, file_path)
-        df_formatted <- df_raw %>% rename_with(str_to_title) %>% mutate(Ticker = ticker)
-        stock_data_list[[ticker]] <- df_formatted
-      }
-    }, error = function(e) { message(paste("Error downloading", ticker)) })
-  }
+    cat(paste("✓", ticker, "downloaded successfully\n"))
+    
+  }, error = function(e) {
+    cat(paste("✗ Error downloading", ticker, ":", e$message, "\n"))
+  })
 }
-
-# Combine and Calculate Metrics
-all_stocks <- bind_rows(stock_data_list)
-
-all_stocks <- all_stocks %>%
-  group_by(Ticker) %>%
-  arrange(Date) %>%
-  mutate(
-    Daily_Return = (Close - lag(Close)) / lag(Close) * 100,
-    Normalized = (Close / first(Close)) * 100,
-    MA_7 = rollmean(Close, k = 7, fill = NA, align = "right"),
-    MA_30 = rollmean(Close, k = 30, fill = NA, align = "right"),
-    Volatility = rollapply(Daily_Return, width = 20, FUN = sd, fill = NA, align = "right")
-  ) %>%
-  ungroup()
-
-summary_stats <- all_stocks %>%
-  group_by(Ticker) %>%
-  summarise(
-    Current_Price = last(Close),
-    Total_Return = ((last(Close) - first(Close)) / first(Close)) * 100,
-    Avg_Volat = sd(Daily_Return, na.rm = TRUE),
-    Avg_Volume = mean(Volume, na.rm = TRUE),
-    .groups = 'drop'
-  ) %>%
-  arrange(desc(Total_Return))
-
-best_stock <- summary_stats[1,]
-
-
-
-
 
 # Check if we got any data
 if (length(stock_data_list) == 0) {
