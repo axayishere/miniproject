@@ -1,11 +1,8 @@
 ---
 title: "Investment Analysis Dashboard"
-runtime: shiny
-output: 
-  flexdashboard::flex_dashboard:
-    orientation: columns
-    vertical_layout: fill
-    source_code: embed
+author: "Connect Cloud"
+date: "`r Sys.Date()`"
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
